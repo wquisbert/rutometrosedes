@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>SEDES LA PAZ | SUISD</title>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+    
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;700;800&display=swap" rel="stylesheet">
+
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: { sans: ['Plus Jakarta Sans', 'sans-serif'] },
+                    colors: {
+                        brand: { 500:'#ef4444', 600:'#dc2626', 800:'#991b1b', 900:'#7f1d1d' },
+                        dark: { 800: '#1e293b', 900: '#0f172a' }
+                    },
+                    boxShadow: {
+                        'float': '0 15px 40px -10px rgba(0,0,0,0.2)',
+                        'glow': '0 0 15px rgba(220, 38, 38, 0.5)'
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        body { overflow: hidden; background: #f1f5f9; touch-action: none; -webkit-tap-highlight-color: transparent; }
+        #map { position: absolute; inset: 0; z-index: 0; }
+        
+        .glass { background: rgba(255, 255, 255, 0.90); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.5); }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        
+        /* Highlight Texto */
+        .hl { background: #fee2e2; color: #991b1b; padding: 0 2px; border-radius: 2px; font-weight: 800; }
+
+        /* --- MARCADORES --- */
+        .tooltip-dest {
+            background: rgba(15, 23, 42, 0.95) !important; border: none !important; border-radius: 8px !important; color: white !important;
+            font-family: 'Plus Jakarta Sans', sans-serif; box-shadow: 0 8px 20px rgba(0,0,0,0.4); padding: 0 !important; white-space: nowrap; z-index: 5000 !important;
+        }
+        .leaflet-tooltip-top.tooltip-dest::before { border-top-color: rgba(15, 23, 42, 0.95) !important; }
+
+        .tooltip-base {
+            background: #991b1b !important; border: 2px solid white !important; border-radius: 6px !important; color: white !important;
+            font-family: 'Plus Jakarta Sans', sans-serif; font-weight: 800; font-size: 10px; padding: 3px 10px !important; box-shadow: 0 4px 15px rgba(0,0,0,0.3); z-index: 4000 !important;
+        }
+        .leaflet-tooltip-bottom.tooltip-base::before { border-bottom-color: #991b1b !important; }
+
+        .pin-marker { display: flex; flex-direction: column; align-items: center; justify-content: flex-end; cursor: grab; transition: transform 0.2s; }
+        .pin-marker:active { cursor: grabbing; transform: scale(1.1) translateY(-5px); }
+        .pin-head { width: 34px; height: 34px; background: #dc2626; border: 3px solid white; border-radius: 50% 50% 0 50%; transform: rotate(45deg); box-shadow: 2px 2px 10px rgba(0,0,0,0.3); display: flex; align-items: center; justify-content: center; }
+        .pin-head::after { content: ''; width: 8px; height: 8px; background: white; border-radius: 50%; }
+
+        /* Animación Ruta */
+        .route-anim { stroke-dasharray: 12, 16; animation: flow 1s linear infinite; }
+        @keyframes flow { to { stroke-dashoffset: -28; } }
+
+        /* Transiciones */
+        .fade-enter { opacity: 0; pointer-events: none; transition: opacity 0.2s; }
+        .fade-active { opacity: 1; pointer-events: auto; }
+        .slide-up-enter { transform: translateY(100%); transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
+        .slide-up-active { transform: translateY(0); }
+        
+        /* Animación Camioneta */
+        .truck-bounce { animation: bounce-truck 2s infinite; }
+        @keyframes bounce-truck { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
+    </style>
+</head>
+<body>
+
+    <div id="map"></div>
+
+    <div id="mobile-brand-header" class="md:hidden fixed top-4 left-0 right-0 z-[1000] flex justify-center pointer-events-none transition-opacity duration-300">
+        <div class="glass px-4 py-2 rounded-full shadow-float flex items-center gap-3 pointer-events-auto">
+            <div class="w-8 h-8 bg-brand-800 rounded-full flex items-center justify-center text-white border-2 border-white shadow-sm">
+                <i class="ph-duotone ph-car text-xl"></i>
+            </div>
+            <div class="flex flex-col">
+                <span class="text-[8px] font-extrabold text-brand-600 uppercase tracking-widest leading-none">SUISD</span>
+                <span class="text-sm font-black text-slate-800 leading-none">RutoMetro SEDES LA PAZ</span>
+            </div>
+        </div>
+    </div>
+
+    <div id="mob-search-trigger" class="md:hidden fixed bottom-8 left-4 right-4 z-[1000] transition-all duration-300 transform">
+        <button onclick="openMobileSearch()" class="w-full bg-white rounded-2xl shadow-float p-4 flex items-center gap-4 active:scale-95 transition-transform border border-slate-100 relative overflow-hidden group">
+            <div class="absolute inset-0 bg-gradient-to-r from-transparent via-slate-50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
+            <div class="w-12 h-12 rounded-2xl bg-slate-100 flex items-center justify-center text-brand-600 relative z-10">
+                <i class="ph-bold ph-magnifying-glass text-2xl"></i>
+            </div>
+            <div class="flex-1 text-left relative z-10">
+                <div class="text-[10px] font-bold uppercase text-slate-400 tracking-wider">Nueva Ruta</div>
+                <div class="text-base font-bold text-slate-800">Buscar destino...</div>
+            </div>
+        </button>
+    </div>
+
+    <div id="mob-search-view" class="md:hidden fixed inset-0 z-[3000] bg-slate-50 flex flex-col fade-enter">
+        <div class="bg-white p-4 shadow-sm border-b border-slate-200 flex items-center gap-3 pt-6"> <button onclick="closeMobileSearch()" class="p-2 -ml-2 rounded-full hover:bg-slate-100 text-slate-600"><i class="ph-bold ph-arrow-left text-xl"></i></button>
+            <div class="flex-1 relative">
+                <input type="text" id="mob-input" placeholder="Nombre de posta, centro..." class="w-full bg-slate-100 rounded-xl py-3.5 pl-11 pr-4 text-base font-bold text-slate-800 placeholder-slate-400 focus:ring-2 focus:ring-brand-600 focus:outline-none focus:bg-white transition-colors">
+                <i class="ph-bold ph-magnifying-glass absolute left-3.5 top-4 text-slate-400 text-lg"></i>
+            </div>
+        </div>
+        <ul id="mob-results" class="flex-1 overflow-y-auto p-2 space-y-2 pb-10"></ul>
+    </div>
+
+    <div id="mob-action-sheet" class="md:hidden fixed bottom-0 left-0 w-full z-[2000] bg-white rounded-t-3xl shadow-float slide-up-enter flex flex-col">
+        <div class="w-full flex justify-center pt-3 pb-1"><div class="w-12 h-1.5 bg-slate-200 rounded-full"></div></div>
+        <div class="p-5 pb-8">
+            <div class="flex justify-between items-start mb-5">
+                <div class="pr-2">
+                    <div class="flex items-center gap-1.5 mb-1 text-brand-600">
+                        <i class="ph-fill ph-map-pin"></i>
+                        <span class="text-[10px] font-bold uppercase tracking-wide" id="mob-sheet-muni">MUNICIPIO</span>
+                    </div>
+                    <h2 class="text-xl font-extrabold text-slate-900 leading-tight" id="mob-sheet-name">-</h2>
+                </div>
+                <button onclick="resetSearch()" class="h-10 w-10 bg-slate-100 rounded-full flex items-center justify-center text-slate-400 hover:text-red-600 transition"><i class="ph-bold ph-x text-lg"></i></button>
+            </div>
+            
+            <button id="mob-btn-calc" onclick="calculateRoute()" class="w-full bg-brand-600 active:bg-brand-800 text-white py-4 rounded-xl font-bold text-sm shadow-lg shadow-red-200 flex justify-center items-center gap-2 transition-transform active:scale-95">
+                <span>CALCULAR RUTA</span> <i class="ph-bold ph-road-horizon text-lg"></i>
+            </button>
+
+            <div id="mob-result-data" class="hidden bg-dark-900 rounded-2xl p-1 text-white shadow-2xl border border-slate-700">
+                <div class="flex items-center p-4 gap-4">
+                    <div class="bg-white/10 rounded-xl p-2 w-16 h-16 flex items-center justify-center shrink-0 border border-white/10 shadow-inner truck-bounce">
+                        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" class="w-full h-full text-white">
+                            <path d="M19 13V11C19 10.4477 18.5523 10 18 10H15.5L14.5 8H9.5L8.5 10H4C3.44772 10 3 10.4477 3 11V13C3 13.5523 3.44772 14 4 14H4.5C4.5 15.3807 5.61929 16.5 7 16.5C8.38071 16.5 9.5 15.3807 9.5 14H14.5C14.5 15.3807 15.6193 16.5 17 16.5C18.3807 16.5 19.5 15.3807 19.5 14H20C20.5523 14 21 13.5523 21 13Z" fill="currentColor"/>
+                            <path d="M7 15C6.44772 15 6 14.5523 6 14C6 13.4477 6.44772 13 7 13C7.55228 13 8 13.4477 8 14C8 14.5523 7.55228 15 7 15Z" fill="#1e293b"/>
+                            <path d="M17 15C16.4477 15 16 14.5523 16 14C16 13.4477 16.4477 13 17 13C17.5523 13 18 13.4477 18 14C18 14.5523 17.5523 15 17 15Z" fill="#1e293b"/>
+                        </svg>
+                    </div>
+                    
+                    <div class="flex-1">
+                        <div class="text-[10px] uppercase font-bold text-slate-400 mb-0.5 tracking-wide">Distancia Estimada</div>
+                        <div class="flex items-baseline gap-1">
+                            <span class="text-3xl font-black text-white leading-none" id="mob-res-km">0.0</span>
+                            <span class="text-sm font-bold text-brand-500">km</span>
+                        </div>
+                    </div>
+                    
+                    <button onclick="resetSearch()" class="h-10 w-10 bg-white/10 hover:bg-white/20 rounded-xl flex items-center justify-center transition border border-white/5"><i class="ph-bold ph-arrow-counter-clockwise text-white"></i></button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="hidden md:flex fixed top-6 left-6 w-[400px] z-[2000] flex-col gap-4 pointer-events-none">
+        <div class="glass rounded-3xl p-6 pointer-events-auto shadow-float border border-white/60 relative">
+            
+            <div class="flex justify-between items-start mb-6">
+                <div>
+                    <span class="bg-brand-50 text-brand-800 text-[10px] font-bold px-2 py-0.5 rounded border border-brand-100 uppercase tracking-wider">SUISD</span>
+                    <h1 class="text-2xl font-extrabold text-slate-900 mt-1">RutoMetro <span class="text-brand-600">SEDES LA PAZ</span></h1>
+                </div>
+                <div class="h-12 w-12 bg-white rounded-2xl border border-slate-100 shadow-sm flex items-center justify-center p-2">
+                    <i class="ph-fill ph-truck text-2xl text-brand-600"></i>
+                </div>
+            </div>
+
+            <div class="mb-5 flex items-center gap-3 p-3 bg-slate-50 border border-slate-200 rounded-2xl">
+                <div class="w-9 h-9 rounded-lg bg-brand-800 flex items-center justify-center text-white shadow-sm"><i class="ph-bold ph-house-line"></i></div>
+                <div class="flex-1">
+                    <div class="text-[9px] uppercase font-bold text-slate-400">Punto de Partida</div>
+                    <div class="font-bold text-slate-800 text-xs" id="pc-lbl-hub">Cargando base...</div>
+                </div>
+            </div>
+
+            <div class="relative z-50">
+                <label class="text-[10px] uppercase font-bold text-brand-800 mb-1 ml-1 flex items-center gap-1"><i class="ph-bold ph-map-pin"></i> Buscar Destino</label>
+                <div class="relative shadow-sm group">
+                    <input type="text" id="pc-input" placeholder="Nombre, Municipio..." autocomplete="off" class="block w-full pl-4 pr-10 py-4 bg-white border border-slate-200 rounded-2xl text-sm font-bold text-slate-800 placeholder-slate-400 focus:outline-none focus:border-brand-600 focus:ring-4 focus:ring-red-50 transition-all shadow-sm">
+                    <button id="pc-btn-clear" onclick="resetSearch()" class="hidden absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-red-600"><i class="ph-fill ph-x-circle text-xl"></i></button>
+                </div>
+                <ul id="pc-results" class="hidden absolute top-full left-0 right-0 mt-3 bg-white rounded-2xl shadow-float border border-slate-100 max-h-[400px] overflow-y-auto no-scrollbar p-1 z-[9999]"></ul>
+            </div>
+
+            <div class="mt-4">
+                 <button id="pc-btn-calc" onclick="calculateRoute()" class="hidden w-full bg-brand-600 hover:bg-brand-500 text-white py-4 rounded-xl font-bold text-sm shadow-lg flex justify-center items-center gap-2 transition-transform active:scale-95"><span>TRAZAR RUTA</span> <i class="ph-bold ph-road-horizon text-lg"></i></button>
+            </div>
+
+            <div id="pc-data-card" class="hidden mt-3 bg-dark-900 rounded-2xl p-5 text-white relative overflow-hidden shadow-lg border border-slate-700">
+                <div class="relative z-10 flex items-center gap-4">
+                    <div class="bg-white/10 p-3 rounded-2xl border border-white/10 shadow-inner">
+                        <i class="ph-fill ph-truck text-4xl text-white"></i>
+                    </div>
+                    <div>
+                        <div class="text-[10px] uppercase text-slate-400 font-bold mb-1 tracking-wide">Distancia Total</div>
+                        <div class="flex items-baseline gap-1">
+                            <span class="text-4xl font-extrabold tracking-tight" id="pc-res-km">0.0</span>
+                            <span class="text-lg font-bold text-brand-500">km</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="layer-menu" class="hidden absolute top-16 right-4 md:top-6 md:right-20 z-[3000] flex-col gap-2">
+        <div class="glass p-2 rounded-2xl shadow-float flex flex-col gap-2 border border-white/50 w-14">
+            <button onclick="setLayer('osm')" class="h-10 w-10 rounded-xl bg-brand-50 text-brand-600 border border-brand-100 flex flex-col items-center justify-center gap-0.5 active:scale-95 transition shadow-sm" title="Calles"><i class="ph-fill ph-road-horizon text-lg"></i></button>
+            <button onclick="setLayer('sat')" class="h-10 w-10 rounded-xl bg-white text-slate-500 hover:bg-slate-50 flex flex-col items-center justify-center gap-0.5 active:scale-95 transition shadow-sm" title="Satélite"><i class="ph-fill ph-globe-hemisphere-west text-lg"></i></button>
+            <button onclick="setLayer('topo')" class="h-10 w-10 rounded-xl bg-white text-slate-500 hover:bg-slate-50 flex flex-col items-center justify-center gap-0.5 active:scale-95 transition shadow-sm" title="Terreno"><i class="ph-fill ph-mountains text-lg"></i></button>
+            <button onclick="setLayer('dark')" class="h-10 w-10 rounded-xl bg-white text-slate-500 hover:bg-slate-50 flex flex-col items-center justify-center gap-0.5 active:scale-95 transition shadow-sm" title="Oscuro"><i class="ph-fill ph-moon-stars text-lg"></i></button>
+        </div>
+    </div>
+    <button onclick="document.getElementById('layer-menu').classList.toggle('hidden')" class="absolute top-4 right-4 md:top-6 md:right-6 z-[1000] w-12 h-12 bg-white border border-slate-200 rounded-2xl flex items-center justify-center text-slate-600 hover:bg-slate-50 shadow-md transition active:scale-95"><i class="ph-fill ph-stack text-2xl"></i></button>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <script>
+        // CONFIGURACIÓN
+        const SHEET_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vR1DHcWzeJllMtxhIQlpaw6byDlbsji0L4w3SZaWTQDgdz2MdeJEGfB6peldYWgEeQUzgr0hP73zwwt/pub?output=csv'; 
+        const HUB_KEYWORD = 'SEDES LA PAZ'; 
+
+        let map, currentLayer, allData = [], markersGroup, routeLayer, pinLayer;
+        let originNode = null, destNode = null;
+        let isMobile = window.innerWidth < 768;
+
+        document.addEventListener('DOMContentLoaded', () => {
+            initMap();
+            loadData();
+            setupInputs();
+            window.addEventListener('resize', () => isMobile = window.innerWidth < 768);
+        });
+
+        // --- MANEJO UI MÓVIL ---
+        function openMobileSearch() {
+            document.getElementById('mob-search-view').classList.add('fade-active');
+            document.getElementById('mob-search-trigger').classList.add('translate-y-[200%]');
+            document.getElementById('mobile-brand-header').classList.add('opacity-0'); // Ocultar header
+            setTimeout(() => document.getElementById('mob-input').focus(), 100);
+        }
+
+        function closeMobileSearch() {
+            document.getElementById('mob-search-view').classList.remove('fade-active');
+            document.getElementById('mob-search-trigger').classList.remove('translate-y-[200%]');
+            document.getElementById('mobile-brand-header').classList.remove('opacity-0'); // Mostrar header
+        }
+
+        function showActionSheet(name, muni) {
+            document.getElementById('mob-action-sheet').classList.add('slide-up-active');
+            document.getElementById('mob-search-trigger').classList.add('translate-y-[200%]');
+            document.getElementById('mob-sheet-name').innerText = name;
+            document.getElementById('mob-sheet-muni').innerText = muni;
+        }
+
+        function hideActionSheet() {
+            document.getElementById('mob-action-sheet').classList.remove('slide-up-active');
+            document.getElementById('mob-search-trigger').classList.remove('translate-y-[200%]');
+            document.getElementById('mob-btn-calc').classList.remove('hidden');
+            document.getElementById('mob-result-data').classList.add('hidden');
+        }
+
+        // --- MAPA ---
+        function initMap() {
+            map = L.map('map', { center: [-16.5, -68.15], zoom: 12, zoomControl: false, attributionControl: false });
+            L.control.zoom({ position: 'topleft' }).addTo(map);
+            setLayer('osm');
+            markersGroup = L.layerGroup().addTo(map);
+            routeLayer = L.layerGroup().addTo(map);
+            pinLayer = L.layerGroup().addTo(map);
+        }
+
+        function setLayer(type) {
+            const urls = {
+                osm: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+                sat: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+                topo: 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',
+                dark: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
+            };
+            if(currentLayer) map.removeLayer(currentLayer);
+            currentLayer = L.tileLayer(urls[type], { maxZoom: 19 }).addTo(map);
+            currentLayer.bringToBack();
+            document.getElementById('layer-menu').classList.add('hidden');
+        }
+
+        // --- DATOS ---
+        function loadData() {
+            Papa.parse(SHEET_URL, {
+                download: true, header: true,
+                complete: (res) => {
+                    allData = res.data.filter(r => r.Latitud && r.Longitud && r.NOMBRE);
+                    findHub();
+                    renderAllPoints(); 
+                }
+            });
+        }
+
+        function findHub() {
+            const hub = allData.find(d => normalize(d.NOMBRE).includes(normalize(HUB_KEYWORD)));
+            if(hub) {
+                originNode = { ...hub, lat: parseFloat(hub.Latitud), lng: parseFloat(hub.Longitud) };
+                document.getElementById('pc-lbl-hub').innerText = hub.NOMBRE;
+                map.setView([originNode.lat, originNode.lng], 13);
+                
+                const icon = L.divIcon({ className: '', html: `<div class="w-10 h-10 bg-brand-800 rounded-full border-4 border-white shadow-lg flex items-center justify-center text-white"><i class="ph-bold ph-house-line"></i></div>`, iconSize: [40, 40], iconAnchor: [20, 20] });
+                const marker = L.marker([originNode.lat, originNode.lng], { icon, zIndexOffset: 500 }).addTo(map);
+                marker.bindTooltip("SEDES LA PAZ", { permanent: true, direction: "bottom", className: "tooltip-base", offset: [0, 20] }).openTooltip();
+            }
+        }
+
+        function renderAllPoints() {
+            markersGroup.clearLayers();
+            allData.forEach(d => {
+                if(normalize(d.NOMBRE).includes(normalize(HUB_KEYWORD))) return;
+                const lat = parseFloat(d.Latitud), lng = parseFloat(d.Longitud);
+                let color = '#64748b';
+                if(normalize(d.NOMBRE).includes('hosp')) color = '#dc2626';
+                if(normalize(d.NOMBRE).includes('centro')) color = '#2563eb';
+                
+                const marker = L.circleMarker([lat, lng], { radius: 5, fillColor: color, color: '#fff', weight: 1, opacity: 1, fillOpacity: 0.8 });
+                marker.bindPopup(`<div class="font-sans text-center"><div class="font-bold text-slate-800 text-xs">${d.NOMBRE}</div><div class="text-[9px] uppercase text-slate-500 mb-2">${d.MUNICIPIO}</div><button onclick="selectDest('${d.NOMBRE.replace(/'/g, "\\'")}', '${d.MUNICIPIO}', ${lat}, ${lng})" class="bg-brand-600 text-white text-xs px-2 py-1 rounded w-full">Seleccionar</button></div>`);
+                marker.addTo(markersGroup);
+            });
+        }
+
+        // --- BUSCADOR ---
+        function normalize(str) { return str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase(); }
+        function highlight(text, term) { const idx = normalize(text).indexOf(term); return idx >= 0 ? text.substring(0, idx) + `<span class="hl">${text.substring(idx, idx + term.length)}</span>` + text.substring(idx + term.length) : text; }
+        function getMeta(d) {
+            const n = normalize(d.NOMBRE);
+            if(n.includes('hosp')) return { icon: 'ph-hospital', col: 'text-red-600', bg: 'bg-red-50' };
+            if(n.includes('centro')) return { icon: 'ph-first-aid', col: 'text-blue-600', bg: 'bg-blue-50' };
+            return { icon: 'ph-map-pin', col: 'text-slate-500', bg: 'bg-slate-50' };
+        }
+
+        function setupInputs() {
+            const render = (term, listId) => {
+                const list = document.getElementById(listId);
+                if(term.length < 2) { list.innerHTML = ''; list.classList.add('hidden'); return; }
+                const matches = allData.filter(d => !normalize(d.NOMBRE).includes(normalize(HUB_KEYWORD)) && (normalize(d.NOMBRE).includes(term) || normalize(d.MUNICIPIO).includes(term))).slice(0, 15);
+                
+                list.innerHTML = matches.map(d => {
+                    const meta = getMeta(d);
+                    return `
+                    <li onclick="selectDest('${d.NOMBRE.replace(/'/g, "\\'")}', '${d.MUNICIPIO}', ${d.Latitud}, ${d.Longitud})" 
+                        class="p-3 bg-white border-b border-slate-50 last:border-0 flex items-center gap-3 cursor-pointer hover:bg-slate-50 transition-colors rounded-xl mx-1 mb-1 shadow-sm border border-transparent hover:border-slate-200">
+                        <div class="w-10 h-10 rounded-xl ${meta.bg} ${meta.col} flex items-center justify-center shrink-0"><i class="ph-fill ${meta.icon} text-lg"></i></div>
+                        <div class="min-w-0">
+                            <div class="text-sm font-bold text-slate-800 truncate leading-tight">${highlight(d.NOMBRE, term)}</div>
+                            <div class="text-[10px] text-slate-400 font-bold uppercase tracking-wide mt-0.5">${highlight(d.MUNICIPIO, term)}</div>
+                        </div>
+                    </li>`;
+                }).join('');
+                list.classList.remove('hidden');
+            };
+            document.getElementById('pc-input').addEventListener('input', (e) => {
+                const v = normalize(e.target.value);
+                document.getElementById('pc-btn-clear').classList.toggle('hidden', v.length === 0);
+                render(v, 'pc-results');
+            });
+            document.getElementById('mob-input').addEventListener('input', (e) => render(normalize(e.target.value), 'mob-results'));
+        }
+
+        // --- SELECCIÓN Y RUTA ---
+        window.selectDest = (name, muni, lat, lng) => {
+            destNode = { name, muni, lat, lng };
+
+            // Desktop
+            document.getElementById('pc-input').value = name;
+            document.getElementById('pc-results').classList.add('hidden');
+            
+            // Mobile
+            closeMobileSearch(); 
+            showActionSheet(name, muni);
+            map.closePopup();
+
+            // Mapa
+            routeLayer.clearLayers();
+            pinLayer.clearLayers();
+
+            const pinIcon = L.divIcon({ className: 'pin-marker', html: `<div class="pin-head"></div><div class="pin-shadow"></div>`, iconSize: [34, 40], iconAnchor: [17, 38] });
+            const marker = L.marker([lat, lng], { icon: pinIcon, draggable: true, zIndexOffset: 2000 }).addTo(pinLayer);
+
+            const labelContent = `<div class="p-2 text-left"><div class="text-[9px] uppercase font-bold text-slate-400 mb-0.5 tracking-wider">${muni}</div><div class="text-xs font-extrabold text-white">${name}</div></div>`;
+            marker.bindTooltip(labelContent, { permanent: true, direction: 'top', className: 'tooltip-dest', offset: [0, -45] }).openTooltip();
+
+            marker.on('dragend', (e) => {
+                const pos = e.target.getLatLng();
+                destNode.lat = pos.lat; destNode.lng = pos.lng;
+                calculateRoute(false);
+            });
+
+            // Zoom
+            const padding = isMobile ? [0, 250] : [0, 0]; 
+            map.flyTo([lat, lng], 16, { paddingBottomRight: padding });
+
+            document.getElementById('pc-btn-calc').classList.remove('hidden');
+            document.getElementById('pc-data-card').classList.add('hidden');
+        };
+
+        window.resetSearch = () => {
+            destNode = null;
+            document.getElementById('pc-input').value = '';
+            document.getElementById('pc-results').classList.add('hidden');
+            document.getElementById('pc-btn-clear').classList.add('hidden');
+            document.getElementById('mob-input').value = '';
+            document.getElementById('mob-results').innerHTML = '';
+            
+            hideActionSheet();
+            routeLayer.clearLayers(); pinLayer.clearLayers();
+            document.getElementById('pc-btn-calc').classList.add('hidden');
+            document.getElementById('pc-data-card').classList.add('hidden');
+            
+            if(originNode) map.flyTo([originNode.lat, originNode.lng], 13);
+        };
+
+        async function calculateRoute(doZoom = true) {
+            if(!originNode || !destNode) return;
+            const btnMob = document.getElementById('mob-btn-calc');
+            const btnPc = document.getElementById('pc-btn-calc');
+            const loader = `<i class="ph-bold ph-spinner animate-spin text-xl"></i>`;
+            btnMob.innerHTML = loader; btnPc.innerHTML = loader;
+
+            try {
+                const res = await fetch(`https://router.project-osrm.org/route/v1/driving/${originNode.lng},${originNode.lat};${destNode.lng},${destNode.lat}?overview=full&geometries=geojson`);
+                const data = await res.json();
+                if(data.code === 'Ok') {
+                    const route = data.routes[0];
+                    const coords = route.geometry.coordinates.map(c => [c[1], c[0]]);
+                    const km = (route.distance/1000).toFixed(2);
+
+                    routeLayer.clearLayers();
+                    L.polyline(coords, { color: 'white', weight: 8, opacity: 0.9 }).addTo(routeLayer);
+                    L.polyline(coords, { color: '#dc2626', weight: 5 }).addTo(routeLayer);
+                    L.polyline(coords, { color: 'white', weight: 2, className: 'route-anim' }).addTo(routeLayer);
+
+                    if(doZoom) {
+                         const padBottom = isMobile ? 300 : 50;
+                         map.fitBounds(L.polyline(coords).getBounds(), { paddingBottomRight: [50, padBottom], paddingTopLeft: [50, 50] });
+                    }
+
+                    document.getElementById('pc-res-km').innerText = km;
+                    document.getElementById('pc-btn-calc').classList.add('hidden');
+                    document.getElementById('pc-data-card').classList.remove('hidden');
+
+                    document.getElementById('mob-res-km').innerText = km;
+                    document.getElementById('mob-btn-calc').classList.add('hidden');
+                    document.getElementById('mob-result-data').classList.remove('hidden');
+                }
+            } catch(e) { alert("Error ruta"); }
+            finally { 
+                btnMob.innerHTML = `<span>TRAZAR RUTA</span>`; 
+                btnPc.innerHTML = `<span>TRAZAR RUTA</span>`; 
+            }
+        }
+    </script>
+</body>
+</html>
